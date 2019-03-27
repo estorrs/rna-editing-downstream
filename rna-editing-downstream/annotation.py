@@ -21,13 +21,13 @@ def get_position_to_data_dict(input_rna_editing_vaf, has_header=False):
 
     for line in f:
         pieces = line.strip().split('\t')
-        chrom, pos, ref_base = pieces[0], pieces[1], pieces[2]
+        chrom, pos, ref_base, alt_base = pieces[0], pieces[1], pieces[2], pieces[3]
         
         data_dict = {'ref_base': ref_base}
         data_dict.update({k:{} for k in input_types})
         for i, input_type in enumerate(input_types):
             for j, field in enumerate(fields):
-                index = 3 + (len(fields) * i) + j
+                index = 4 + (len(fields) * i) + j
                 val = pieces[index]
                 if field == 'depth':
                     val = int(val)
@@ -37,7 +37,7 @@ def get_position_to_data_dict(input_rna_editing_vaf, has_header=False):
                 data_dict[input_type][field] = val
     
         for i, annotation in enumerate(annotations):
-            index = 3 + (len(fields) * len(input_types)) + i
+            index = 4 + (len(fields) * len(input_types)) + i
             val = pieces[index]
             if val.isdecimal():
                 val = float(val)
