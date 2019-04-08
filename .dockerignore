@@ -2,4 +2,4 @@ __pycache__/
 *.pyc
 
 cwl/
-tests/data/
+#tests/data/
