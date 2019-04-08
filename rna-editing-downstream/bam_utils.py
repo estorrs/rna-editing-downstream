@@ -18,6 +18,11 @@ RNA_EDITING_TYPES = {
         '+': {('g', 'a'): 'A->I', ('t', 'c'): 'C->U'}
         }
 
+R_RNA_EDITING_TYPES = {
+        '-': {'A->I': ('c', 't'), 'C->U': ('a', 'g')},
+        '+': {'A->I': ('g', 'a'), 'C->U': ('t', 'c')}
+        }
+
 def index_reference(reference_fasta_fp):
     """index the given reference if it doesnt exist"""
     if not os.path.isfile(reference_fasta_fp + '.fai'):
@@ -77,7 +82,8 @@ def count_mismatches(cigar, read_seq, reference_seq):
     return mismatches
 
 # this is bad repition, incorporate into other function
-def count_valid_rna_editing_mismatches(cigar, read_seq, reference_seq, strand):
+def count_valid_rna_editing_mismatches(cigar, read_seq, reference_seq, strand,
+        editing_type=None):
     read_counter = 0
     ref_counter = 0
 
@@ -90,7 +96,12 @@ def count_valid_rna_editing_mismatches(cigar, read_seq, reference_seq, strand):
             read_nucleotides = read_seq[read_counter:read_counter + count].lower()
             ref_nucleotides = reference_seq[ref_counter:ref_counter + count].lower()
             for read_base, ref_base in zip(read_nucleotides, ref_nucleotides):
-                is_editing_change = (read_base, ref_base) in VALID_RNA_EDITING_CHANGES[strand]
+                if editing_type is None:
+                    is_editing_change = (read_base, ref_base) in VALID_RNA_EDITING_CHANGES[strand]
+                else:
+                    expected_tup = R_RNA_EDITING_TYPES[strand][editing_type]
+                    is_editing_change = (read_base, ref_base) == expected_tup
+
                 if read_base != ref_base and is_editing_change:
                     mismatches += 1
 
@@ -259,7 +270,7 @@ def get_reads_to_sequences_from_fasta_stream(input_fasta_stream):
 
     return reads_to_sequences
 
-def get_chrom_start_cigar_seq_read_tups(input_bam_fp, positions_fp, max_depth=10000):
+def get_chrom_start_cigar_seq_read_tups(input_bam_fp, positions_fp, max_depth=500):
     tool_args = ['samtools', 'view',
             '-L', positions_fp,
              input_bam_fp]
@@ -268,15 +279,23 @@ def get_chrom_start_cigar_seq_read_tups(input_bam_fp, positions_fp, max_depth=10
     ps_1.wait()
 
     read_tups = []
+    position_to_depth = {}
     for line in output.split('\n'):
         if line:
             pieces = line.split('\t')
             chrom, pos, cigar, seq = pieces[0], pieces[1], pieces[2], pieces[3]
-            read_tups.append((chrom, pos, cigar, seq))
+
+            if (chrom, pos) in position_to_depth:
+                position_to_depth[(chrom, pos)] += 1
+            else:
+                position_to_depth[(chrom, pos)] = 1
+
+            if position_to_depth[(chrom, pos)] < max_depth:
+                read_tups.append((chrom, pos, cigar, seq))
 
     return read_tups
 
-def write_position_fasta(input_bam_fp, positions_fp, output_fasta_fp, max_depth=1000):
+def write_position_fasta(input_bam_fp, positions_fp, output_fasta_fp, max_depth=500):
     """Writes a fasta with the given positions and bam.
 
     Will also return a dict mapping reads to their sequence"""

@@ -202,7 +202,8 @@ def get_editing_type_and_percentage(data_dict, rna_type='normal'):
     else:
         return '.', '.'
 
-def get_neighborhood_valid_editing_percentage(chrom, pos, data_dict, read_collection_reads):
+def get_neighborhood_valid_editing_percentage(chrom, pos, data_dict, read_collection_reads,
+        editing_type):
     count = 0
     total = 0
     for read_chrom, read_start, read_cigar, read_seq, read_dict in read_collection_reads:
@@ -211,9 +212,11 @@ def get_neighborhood_valid_editing_percentage(chrom, pos, data_dict, read_collec
         
         if strand != '+' and strand != '-':
             return '.'
+        if editing_type == '.':
+            return '.'
         
         count += bam_utils.count_valid_rna_editing_mismatches(
-                    read_cigar, read_seq, reference_seq, strand)
+                    read_cigar, read_seq, reference_seq, strand, editing_type)
         total += bam_utils.count_mismatches(read_cigar, read_seq, reference_seq)
 
     if total:
@@ -244,11 +247,6 @@ def get_annotations(read_collection, position_to_data_dict):
         reads = read_collection.get_reads(chrom, int(pos))
         annotations = {}
 
-        neighborhood_valid_editing_percentage = get_neighborhood_valid_editing_percentage(
-                chrom, pos, data_dict, reads)
-
-        annotations['NEIGHBORHOOD_VALID_EDITING_%'] = neighborhood_valid_editing_percentage
-
         normal_editing_type, normal_percentage = get_editing_type_and_percentage(data_dict, rna_type='normal')
         tumor_editing_type, tumor_percentage = get_editing_type_and_percentage(data_dict, rna_type='tumor')
         annotations['NORMAL_EDITING_TYPE'] = normal_editing_type
@@ -256,28 +254,17 @@ def get_annotations(read_collection, position_to_data_dict):
         annotations['TUMOR_EDITING_TYPE'] = tumor_editing_type
         annotations['TUMOR_EDITING_%'] = tumor_percentage
 
+        neighborhood_valid_editing_percentage = get_neighborhood_valid_editing_percentage(
+                chrom, pos, data_dict, reads, tumor_editing_type)
+
+        annotations['NEIGHBORHOOD_VALID_EDITING_%'] = neighborhood_valid_editing_percentage
+
         annotations['IS_EDITING_SITE'] = call_editing_site(normal_editing_type, tumor_editing_type,
                 neighborhood_valid_editing_percentage,
                 blat_percent_passing=data_dict['blat_percent_passing'])
         annotations['IS_EDITING_SITE_NO_BLAT'] = call_editing_site(normal_editing_type, tumor_editing_type,
                 neighborhood_valid_editing_percentage,
                 blat_percent_passing=None)
-
-
-
-#         is_editing_site = False
-# 
-#         if '.' in [normal_editing_type, tumor_editing_type, neighborhood_valid_editing_percentage,
-#                 data_dict['blat_percent_passing']]:
-#             annotations['IS_EDITING_SITE'] = 'FALSE'
-#         else:
-#             valid_types = normal_editing_type == tumor_editing_type
-#             valid_neighborhood_editing_levels = neighborhood_valid_editing_percentage >= .8
-#             valid_blat_result = data_dict['blat_percent_passing'] >= .5
-#             if valid_types and valid_neighborhood_editing_levels and valid_blat_result:
-#                 annotations['IS_EDITING_SITE'] = 'TRUE'
-#             else:
-#                 annotations['IS_EDITING_SITE'] = 'FALSE'
 
         sorted_annotations = sorted(list(annotations.items()), key=lambda x: x[0])
         print(sorted_annotations)
