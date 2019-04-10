@@ -10,7 +10,7 @@ INPUT_BAM = os.path.join(TEST_DATA_DIR,
 INPUT_ANNOTATED_VAF = os.path.join(TEST_DATA_DIR,
         'C3N-00435.chr1.tsv')
 INPUT_ANNOTATED_VAF = os.path.join(TEST_DATA_DIR,
-        'test.tsv')
+        'new.test.tsv')
 REFERENCE_FASTA = os.path.join(TEST_DATA_DIR,
         'hg38.fa')
 

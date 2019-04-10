@@ -123,7 +123,8 @@ def count_valid_rna_editing_mismatches(cigar, read_seq, reference_seq, base_qual
 
     return mismatches
 
-def is_valid_rna_editing_site(start, target_pos, cigar, read_seq, reference_seq, strand):
+def is_valid_rna_editing_site(start, target_pos, cigar, read_seq, reference_seq,
+        sequence_quality, strand, editing_type, min_base_quality=20):
     read_counter = 0
     ref_counter = 0
 
@@ -135,11 +136,15 @@ def is_valid_rna_editing_site(start, target_pos, cigar, read_seq, reference_seq,
         if identifier in BOTH_COUNTS:
             for i in range(count):
                 if start + i + ref_counter == target_pos:
-                    if (read_seq[read_counter + i].lower(),
+                    converted_base_quality = ord(sequence_quality[read_counter + i]) - 33
+                    passes_base_quality = converted_base_quality >= min_base_quality
+
+                    if passes_base_quality and (read_seq[read_counter + i].lower(),
                             reference_seq[ref_counter + i].lower()) in VALID_RNA_EDITING_CHANGES[strand]:
                         return True
                     else:
                         return False
+
             read_counter += count
             ref_counter += count
 
