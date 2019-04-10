@@ -1,8 +1,9 @@
+from collections import Counter
 import os
 import re
 import subprocess
+import sys
 import uuid
-from collections import Counter
 
 import bam_utils
 
@@ -12,7 +13,7 @@ def get_position_to_data_dict(input_rna_editing_vaf, has_header=False):
     if has_header:
         f.readline()
     
-    input_types = ['dna.a', 'dna.t', 'rna.a', 'rna.t']
+    input_types = ['dna', 'rna']
     fields = ['depth', 'ref_vaf', 'minor_vaf', 'a_vaf', 'c_vaf', 'g_vaf', 't_vaf', 'n_vaf']
     annotations = ['primary_transcript', 'gene', 'strand', 'region', 'non_verbose_region', 'info', 
                    'repeat_name', 'repeat_class', 'repeat_family', 'blat_percent_passing']
@@ -23,11 +24,12 @@ def get_position_to_data_dict(input_rna_editing_vaf, has_header=False):
         pieces = line.strip().split('\t')
         chrom, pos, ref_base, alt_base = pieces[0], pieces[1], pieces[2], pieces[3]
         
-        data_dict = {'ref_base': ref_base}
+        data_dict = {'ref_base': ref_base, 'alt_base': alt_base}
         data_dict.update({k:{} for k in input_types})
         for i, input_type in enumerate(input_types):
             for j, field in enumerate(fields):
                 index = 4 + (len(fields) * i) + j
+                print(index, pieces[index], file=sys.stderr)
                 val = pieces[index]
                 if field == 'depth':
                     val = int(val)
@@ -41,6 +43,7 @@ def get_position_to_data_dict(input_rna_editing_vaf, has_header=False):
     
         for i, annotation in enumerate(annotations):
             index = 4 + (len(fields) * len(input_types)) + i
+            print(index, pieces[index], file=sys.stderr)
             val = pieces[index]
             if val.isdigit():
                 val = int(val)
@@ -157,9 +160,7 @@ def get_percent_altered_reads_valid_editing_changes(chrom, pos, data_dict, read_
         return count / total
     return '.'
 
-#     input_types = ['dna.a', 'dna.t', 'rna.a', 'rna.t']
-#     fields = ['depth', 'ref_vaf', 'minor_vaf', 'a_vaf', 'c_vaf', 'g_vaf', 't_vaf', 'n_vaf']
-def get_base_change(ref_base, minor_vaf, a_vaf, c_vaf, g_vaf, t_vaf):
+def get_editing_level(alt_base, minor_vaf, a_vaf, c_vaf, g_vaf, t_vaf):
     vafs = [v for v in [a_vaf, c_vaf, g_vaf, t_vaf]
             if v <= minor_vaf]
     max_vaf = max(vafs)
@@ -172,28 +173,25 @@ def get_base_change(ref_base, minor_vaf, a_vaf, c_vaf, g_vaf, t_vaf):
     if max_vaf == 0.0 or little_vaf_sum / max_vaf > .2:
         return '.', 0.0
 
-    if 'a' != ref_base.lower() and a_vaf == max_vaf:
+    if 'a' == alt_base.lower():
         return 'A', a_vaf
-    if 'c' != ref_base.lower() and c_vaf == max_vaf:
+    if 'c' == alt_base.lower():
         return 'C', c_vaf
-    if 'g' != ref_base.lower() and g_vaf == max_vaf:
+    if 'g' == alt_base.lower():
         return 'G', g_vaf
-    if 't' != ref_base.lower() and t_vaf == max_vaf:
+    if 't' == alt_base.lower():
         return 'T', t_vaf
 
     return '.', 0.0
 
-def get_editing_type_and_percentage(data_dict, rna_type='normal'):
+def get_editing_type_and_percentage(data_dict):
     strand = data_dict['strand']
     ref = data_dict['ref_base']
 
-    if rna_type == 'normal':
-        d = data_dict['rna.a']
-    else:
-        d = data_dict['rna.t']
+    d = data_dict['rna']
 
-    alt, vaf = get_base_change(ref, d['minor_vaf'], d['a_vaf'], d['c_vaf'],
-            d['g_vaf'], d['t_vaf'])
+    alt = data_dict['alt_base']
+    alt, vaf = get_editing_level(alt, d['minor_vaf'], d['a_vaf'], d['c_vaf'], d['g_vaf'], d['t_vaf'])
 
     tup = (alt.lower(), ref.lower())
 
@@ -215,31 +213,33 @@ def get_neighborhood_valid_editing_percentage(chrom, pos, data_dict, read_collec
             return '.'
         if editing_type == '.':
             return '.'
-        
-        count += bam_utils.count_valid_rna_editing_mismatches(
+
+        if bam_utils.is_valid_rna_editing_site(int(read_start), int(pos),
                 read_cigar, read_seq, reference_seq, sequence_quality, strand, editing_type,
-                min_base_quality=25)
-        total += bam_utils.count_mismatches(read_cigar, read_seq, reference_seq, sequence_quality,
-                min_base_quality=25)
+                min_base_quality=25):
+            count += bam_utils.count_valid_rna_editing_mismatches(
+                    read_cigar, read_seq, reference_seq, sequence_quality, strand, editing_type,
+                    min_base_quality=25)
+            total += bam_utils.count_mismatches(read_cigar, read_seq, reference_seq, sequence_quality,
+                    min_base_quality=25)
 
     if total:
         return count / total
     return '.'
 
-def call_editing_site(normal_editing_type, tumor_editing_type, neighborhood_valid_editing_percentage,
+def call_editing_site(editing_type, neighborhood_valid_editing_percentage,
         blat_percent_passing=None):
     if blat_percent_passing is None:
         blat_percent_passing = 1.0
 
-    if '.' in [normal_editing_type, tumor_editing_type, neighborhood_valid_editing_percentage,
+    if '.' in [editing_type, neighborhood_valid_editing_percentage,
             blat_percent_passing]:
         return 'FALSE'
 
-    valid_types = normal_editing_type == tumor_editing_type
     valid_neighborhood_editing_levels = neighborhood_valid_editing_percentage >= .8
     valid_blat_result = blat_percent_passing >= .5
 
-    if valid_types and valid_neighborhood_editing_levels and valid_blat_result:
+    if valid_neighborhood_editing_levels and valid_blat_result:
         return 'TRUE'
     return 'FALSE'
 
@@ -250,22 +250,19 @@ def get_annotations(read_collection, position_to_data_dict):
         reads = read_collection.get_reads(chrom, int(pos))
         annotations = {}
 
-        normal_editing_type, normal_percentage = get_editing_type_and_percentage(data_dict, rna_type='normal')
-        tumor_editing_type, tumor_percentage = get_editing_type_and_percentage(data_dict, rna_type='tumor')
-        annotations['NORMAL_EDITING_TYPE'] = normal_editing_type
-        annotations['NORMAL_EDITING_%'] = normal_percentage
-        annotations['TUMOR_EDITING_TYPE'] = tumor_editing_type
-        annotations['TUMOR_EDITING_%'] = tumor_percentage
+        editing_type, percentage = get_editing_type_and_percentage(data_dict)
+        annotations['EDITING_TYPE'] = editing_type
+        annotations['EDITING_%'] = percentage
 
         neighborhood_valid_editing_percentage = get_neighborhood_valid_editing_percentage(
-                chrom, pos, data_dict, reads, tumor_editing_type)
+                chrom, pos, data_dict, reads, editing_type)
 
         annotations['NEIGHBORHOOD_VALID_EDITING_%'] = neighborhood_valid_editing_percentage
 
-        annotations['IS_EDITING_SITE'] = call_editing_site(normal_editing_type, tumor_editing_type,
+        annotations['IS_EDITING_SITE'] = call_editing_site(editing_type,
                 neighborhood_valid_editing_percentage,
                 blat_percent_passing=data_dict['blat_percent_passing'])
-        annotations['IS_EDITING_SITE_NO_BLAT'] = call_editing_site(normal_editing_type, tumor_editing_type,
+        annotations['IS_EDITING_SITE_NO_BLAT'] = call_editing_site(editing_type,
                 neighborhood_valid_editing_percentage,
                 blat_percent_passing=None)
 
