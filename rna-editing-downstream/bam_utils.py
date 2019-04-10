@@ -55,7 +55,7 @@ def get_covering_reference_coords(start, cigar, seq):
 
     return int(start), ref_end - 1
 
-def count_mismatches(cigar, read_seq, reference_seq):
+def count_mismatches(cigar, read_seq, reference_seq, base_quality_seq, min_base_quality=20):
     read_counter = 0
     ref_counter = 0
 
@@ -66,9 +66,12 @@ def count_mismatches(cigar, read_seq, reference_seq):
     for count, identifier in zip(counts, identifiers):
         if identifier in BOTH_COUNTS:
             read_nucleotides = read_seq[read_counter:read_counter + count].lower()
+            base_qualities = base_quality_seq[read_counter:read_counter + count]
             ref_nucleotides = reference_seq[ref_counter:ref_counter + count].lower()
-            for read_base, ref_base in zip(read_nucleotides, ref_nucleotides):
-                if read_base != ref_base:
+            for read_base, base_quality, ref_base in zip(read_nucleotides, base_qualities,
+                    ref_nucleotides):
+                converted_base_quality = ord(base_quality) - 33
+                if read_base != ref_base and converted_base_quality >= min_base_quality:
                     mismatches += 1
 
             read_counter += count
@@ -82,8 +85,8 @@ def count_mismatches(cigar, read_seq, reference_seq):
     return mismatches
 
 # this is bad repition, incorporate into other function
-def count_valid_rna_editing_mismatches(cigar, read_seq, reference_seq, strand,
-        editing_type=None):
+def count_valid_rna_editing_mismatches(cigar, read_seq, reference_seq, base_quality_seq, strand,
+        editing_type=None, min_base_quality=20):
     read_counter = 0
     ref_counter = 0
 
@@ -94,15 +97,20 @@ def count_valid_rna_editing_mismatches(cigar, read_seq, reference_seq, strand,
     for count, identifier in zip(counts, identifiers):
         if identifier in BOTH_COUNTS:
             read_nucleotides = read_seq[read_counter:read_counter + count].lower()
+            base_qualities = base_quality_seq[read_counter:read_counter + count]
             ref_nucleotides = reference_seq[ref_counter:ref_counter + count].lower()
-            for read_base, ref_base in zip(read_nucleotides, ref_nucleotides):
+
+            for read_base, base_quality, ref_base in zip(read_nucleotides, base_qualities, ref_nucleotides):
                 if editing_type is None:
                     is_editing_change = (read_base, ref_base) in VALID_RNA_EDITING_CHANGES[strand]
                 else:
                     expected_tup = R_RNA_EDITING_TYPES[strand][editing_type]
                     is_editing_change = (read_base, ref_base) == expected_tup
 
-                if read_base != ref_base and is_editing_change:
+                converted_base_quality = ord(base_quality) - 33
+                passes_base_quality = converted_base_quality >= min_base_quality
+
+                if read_base != ref_base and is_editing_change and passes_base_quality:
                     mismatches += 1
 
             read_counter += count
@@ -270,12 +278,12 @@ def get_reads_to_sequences_from_fasta_stream(input_fasta_stream):
 
     return reads_to_sequences
 
-def get_chrom_start_cigar_seq_read_tups(input_bam_fp, positions_fp, max_depth=500):
+def get_chrom_start_cigar_seq_qual_read_tups(input_bam_fp, positions_fp, max_depth=500):
     tool_args = ['samtools', 'view',
             '-L', positions_fp,
              input_bam_fp]
     ps_1 = subprocess.Popen(tool_args, stdout=subprocess.PIPE)
-    output = subprocess.check_output(('cut', '-f', '3,4,6,10'), stdin=ps_1.stdout).decode('utf-8')
+    output = subprocess.check_output(('cut', '-f', '3,4,6,10,11'), stdin=ps_1.stdout).decode('utf-8')
     ps_1.wait()
 
     read_tups = []
@@ -283,7 +291,7 @@ def get_chrom_start_cigar_seq_read_tups(input_bam_fp, positions_fp, max_depth=50
     for line in output.split('\n'):
         if line:
             pieces = line.split('\t')
-            chrom, pos, cigar, seq = pieces[0], pieces[1], pieces[2], pieces[3]
+            chrom, pos, cigar, seq, qual_seq = pieces[0], pieces[1], pieces[2], pieces[3], pieces[4]
 
             if (chrom, pos) in position_to_depth:
                 position_to_depth[(chrom, pos)] += 1
@@ -291,7 +299,7 @@ def get_chrom_start_cigar_seq_read_tups(input_bam_fp, positions_fp, max_depth=50
                 position_to_depth[(chrom, pos)] = 1
 
             if position_to_depth[(chrom, pos)] < max_depth:
-                read_tups.append((chrom, pos, cigar, seq))
+                read_tups.append((chrom, pos, cigar, seq, qual_seq))
 
     return read_tups
 
