@@ -29,7 +29,6 @@ def get_position_to_data_dict(input_rna_editing_vaf, has_header=False):
         for i, input_type in enumerate(input_types):
             for j, field in enumerate(fields):
                 index = 4 + (len(fields) * i) + j
-                print(index, pieces[index], file=sys.stderr)
                 val = pieces[index]
                 if field == 'depth':
                     val = int(val)
@@ -43,7 +42,6 @@ def get_position_to_data_dict(input_rna_editing_vaf, has_header=False):
     
         for i, annotation in enumerate(annotations):
             index = 4 + (len(fields) * len(input_types)) + i
-            print(index, pieces[index], file=sys.stderr)
             val = pieces[index]
             if val.isdigit():
                 val = int(val)
