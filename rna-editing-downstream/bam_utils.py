@@ -124,7 +124,8 @@ def count_valid_rna_editing_mismatches(cigar, read_seq, reference_seq, base_qual
     return mismatches
 
 def is_valid_rna_editing_site(start, target_pos, cigar, read_seq, reference_seq,
-        sequence_quality, strand, editing_type, min_base_quality=20):
+        sequence_quality, mapping_quality, strand, editing_type, min_base_quality=20,
+        min_mapping_quality=20):
     read_counter = 0
     ref_counter = 0
 
@@ -137,10 +138,13 @@ def is_valid_rna_editing_site(start, target_pos, cigar, read_seq, reference_seq,
             for i in range(count):
                 if start + i + ref_counter == target_pos:
                     converted_base_quality = ord(sequence_quality[read_counter + i]) - 33
-                    passes_base_quality = converted_base_quality >= min_base_quality
 
-                    if passes_base_quality and (read_seq[read_counter + i].lower(),
-                            reference_seq[ref_counter + i].lower()) in VALID_RNA_EDITING_CHANGES[strand]:
+                    passes_base_quality = converted_base_quality >= min_base_quality
+                    passes_mapping_quality = int(mapping_quality) >= min_mapping_quality
+                    valid_editing_change = (read_seq[read_counter + i].lower(),
+                            reference_seq[ref_counter + i].lower()) in VALID_RNA_EDITING_CHANGES[strand]
+
+                    if passes_base_quality and passes_mapping_quality and valid_editing_change:
                         return True
                     else:
                         return False
@@ -288,7 +292,7 @@ def get_chrom_start_cigar_seq_qual_read_tups(input_bam_fp, positions_fp, max_dep
             '-L', positions_fp,
              input_bam_fp]
     ps_1 = subprocess.Popen(tool_args, stdout=subprocess.PIPE)
-    output = subprocess.check_output(('cut', '-f', '3,4,6,10,11'), stdin=ps_1.stdout).decode('utf-8')
+    output = subprocess.check_output(('cut', '-f', '3,4,5,6,10,11'), stdin=ps_1.stdout).decode('utf-8')
     ps_1.wait()
 
     read_tups = []
@@ -296,7 +300,7 @@ def get_chrom_start_cigar_seq_qual_read_tups(input_bam_fp, positions_fp, max_dep
     for line in output.split('\n'):
         if line:
             pieces = line.split('\t')
-            chrom, pos, cigar, seq, qual_seq = pieces[0], pieces[1], pieces[2], pieces[3], pieces[4]
+            chrom, pos, map_qual, cigar, seq, qual_seq = pieces[0], pieces[1], pieces[2], pieces[3], pieces[4], pieces[5]
 
             if (chrom, pos) in position_to_depth:
                 position_to_depth[(chrom, pos)] += 1
@@ -304,7 +308,7 @@ def get_chrom_start_cigar_seq_qual_read_tups(input_bam_fp, positions_fp, max_dep
                 position_to_depth[(chrom, pos)] = 1
 
             if position_to_depth[(chrom, pos)] < max_depth:
-                read_tups.append((chrom, pos, cigar, seq, qual_seq))
+                read_tups.append((chrom, pos, cigar, seq, qual_seq, map_qual))
 
     return read_tups
 

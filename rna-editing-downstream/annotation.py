@@ -75,7 +75,7 @@ def get_read_to_reference_seq(read_tups, regions_fp, reference_fasta):
     read_to_reference_sequence = bam_utils.get_reads_to_sequences_from_fasta_stream(output)
     
     read_tups_to_reference_seqs = {}
-    for chrom, pos, cigar, seq, _ in read_tups:
+    for chrom, pos, cigar, seq, _, _ in read_tups:
         end = bam_utils.get_covering_reference_coords(int(pos), cigar, seq)[1]
         reference_seq = read_to_reference_sequence[f'{chrom}:{pos}-{end}']
         read_tups_to_reference_seqs[(chrom, pos, cigar, seq)] = reference_seq
@@ -205,6 +205,7 @@ def get_neighborhood_valid_editing_percentage(chrom, pos, data_dict, read_collec
     for read_chrom, read_start, read_cigar, read_seq, read_dict in read_collection_reads:
         reference_seq = read_dict['reference_sequence']
         sequence_quality = read_dict['sequence_quality']
+        mapping_quality = read_dict['mapping_quality']
         strand = data_dict['strand']
 
         if strand != '+' and strand != '-':
@@ -213,8 +214,8 @@ def get_neighborhood_valid_editing_percentage(chrom, pos, data_dict, read_collec
             return '.'
 
         if bam_utils.is_valid_rna_editing_site(int(read_start), int(pos),
-                read_cigar, read_seq, reference_seq, sequence_quality, strand, editing_type,
-                min_base_quality=25):
+                read_cigar, read_seq, reference_seq, sequence_quality, mapping_quality, strand,
+                editing_type, min_base_quality=25, min_mapping_quality=20):
             count += bam_utils.count_valid_rna_editing_mismatches(
                     read_cigar, read_seq, reference_seq, sequence_quality, strand, editing_type,
                     min_base_quality=25)
@@ -283,15 +284,15 @@ def get_rna_editing_annotations(input_bam_fp, input_annotated_vaf_fp, reference_
     u_id = str(uuid.uuid4())
     temp_regions_fp = f'temp.regions.{u_id}.txt'
     chrom_start_stop_tups = [(chrom, *bam_utils.get_covering_reference_coords(int(pos), cigar, seq))
-            for chrom, pos, cigar, seq, _ in read_tups]
+            for chrom, pos, cigar, seq, _, _ in read_tups]
     write_regions_file(chrom_start_stop_tups, temp_regions_fp)
     read_tups_to_reference_seq = get_read_to_reference_seq(read_tups, temp_regions_fp, reference_fasta_fp)
 
     rc = bam_utils.ReadCollection(chrom_pos_tups)
-    for chrom, pos, cigar, seq, qual_seq in read_tups:
+    for chrom, pos, cigar, seq, qual_seq, map_qual in read_tups:
         rc.put_read(chrom, pos, cigar, seq,
                 reference_sequence=read_tups_to_reference_seq[(chrom, pos, cigar, seq)],
-                sequence_quality=qual_seq)
+                sequence_quality=qual_seq, mapping_quality=map_qual)
 
     annotations = get_annotations(rc, position_to_data_dict)
 
