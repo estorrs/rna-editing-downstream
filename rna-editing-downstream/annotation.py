@@ -15,7 +15,7 @@ def get_position_to_data_dict(input_rna_editing_vaf, has_header=False):
     
     input_types = ['dna', 'rna']
     fields = ['depth', 'ref_vaf', 'minor_vaf', 'a_vaf', 'c_vaf', 'g_vaf', 't_vaf', 'n_vaf']
-    annotations = ['primary_transcript', 'gene', 'strand', 'region', 'non_verbose_region', 'info', 
+    annotations = ['primary_transcript', 'gene', 'strand', 'coordinates', 'region', 'non_verbose_region', 'info', 
                    'repeat_name', 'repeat_class', 'repeat_family', 'blat_percent_passing']
 
     position_to_data_dict = {}
@@ -43,6 +43,8 @@ def get_position_to_data_dict(input_rna_editing_vaf, has_header=False):
         for i, annotation in enumerate(annotations):
             index = 4 + (len(fields) * len(input_types)) + i
             val = pieces[index]
+            import sys
+            print(i, index, val, file=sys.stderr)
             if val.isdigit():
                 val = int(val)
             else:
@@ -276,27 +278,39 @@ def get_rna_editing_annotations(input_bam_fp, input_annotated_vaf_fp, reference_
     position_to_data_dict = get_position_to_data_dict(input_annotated_vaf_fp, has_header=has_header)
 
     chrom_pos_tups = sorted(set(position_to_data_dict.keys()))
-    u_id = str(uuid.uuid4())
-    temp_positions_fp = f'temp.positions.{u_id}.bed'
-    write_positions_bed(chrom_pos_tups, temp_positions_fp)
-    read_tups = bam_utils.get_chrom_start_cigar_seq_qual_read_tups(input_bam_fp, temp_positions_fp)
 
-    u_id = str(uuid.uuid4())
-    temp_regions_fp = f'temp.regions.{u_id}.txt'
-    chrom_start_stop_tups = [(chrom, *bam_utils.get_covering_reference_coords(int(pos), cigar, seq))
-            for chrom, pos, cigar, seq, _, _ in read_tups]
-    write_regions_file(chrom_start_stop_tups, temp_regions_fp)
-    read_tups_to_reference_seq = get_read_to_reference_seq(read_tups, temp_regions_fp, reference_fasta_fp)
+    # chunk to hopefully not run out of memory
+    chunked_chrom_pos_tups = []
+    prev = 0
+    for i in range(5000, len(chrom_pos_tups) + 5000, 5000):
+        chunked_chrom_pos_tups.append(chrom_pos_tups[prev:i])
+        prev = i
 
-    rc = bam_utils.ReadCollection(chrom_pos_tups)
-    for chrom, pos, cigar, seq, qual_seq, map_qual in read_tups:
-        rc.put_read(chrom, pos, cigar, seq,
-                reference_sequence=read_tups_to_reference_seq[(chrom, pos, cigar, seq)],
-                sequence_quality=qual_seq, mapping_quality=map_qual)
+    annotations = {}
+    for chrom_pos_tups_chunk in chunked_chrom_pos_tups:
+        if chrom_pos_tups_chunk:
 
-    annotations = get_annotations(rc, position_to_data_dict)
+            u_id = str(uuid.uuid4())
+            temp_positions_fp = f'temp.positions.{u_id}.bed'
+            write_positions_bed(chrom_pos_tups_chunk, temp_positions_fp)
+            read_tups = bam_utils.get_chrom_start_cigar_seq_qual_read_tups(input_bam_fp, temp_positions_fp)
 
-    os.remove(temp_positions_fp)
-    os.remove(temp_regions_fp)
+            u_id = str(uuid.uuid4())
+            temp_regions_fp = f'temp.regions.{u_id}.txt'
+            chrom_start_stop_tups = [(chrom, *bam_utils.get_covering_reference_coords(int(pos), cigar, seq))
+                    for chrom, pos, cigar, seq, _, _ in read_tups]
+            write_regions_file(chrom_start_stop_tups, temp_regions_fp)
+            read_tups_to_reference_seq = get_read_to_reference_seq(read_tups, temp_regions_fp, reference_fasta_fp)
+
+            rc = bam_utils.ReadCollection(chrom_pos_tups_chunk)
+            for chrom, pos, cigar, seq, qual_seq, map_qual in read_tups:
+                rc.put_read(chrom, pos, cigar, seq,
+                        reference_sequence=read_tups_to_reference_seq[(chrom, pos, cigar, seq)],
+                        sequence_quality=qual_seq, mapping_quality=map_qual)
+
+            annotations.update(get_annotations(rc, position_to_data_dict))
+
+            os.remove(temp_positions_fp)
+            os.remove(temp_regions_fp)
 
     return annotations
